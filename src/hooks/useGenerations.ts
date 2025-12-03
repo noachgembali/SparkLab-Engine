@@ -9,6 +9,7 @@ export interface Generation {
   status: "queued" | "running" | "success" | "failed";
   url: string | null;
   meta: Record<string, any> | null;
+  raw_response?: Record<string, any> | null;
   params?: Record<string, any> | null;
   prompt: string;
   error: string | null;

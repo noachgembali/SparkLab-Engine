@@ -36,6 +36,12 @@ interface GenerationParams {
 
 interface GenerationMeta {
   urls?: string[];
+  aspectRatio?: string;
+  style?: string;
+  steps?: number;
+  promptStrength?: number;
+  seed?: number;
+  outputCount?: number;
   [key: string]: unknown;
 }
 
@@ -46,6 +52,7 @@ interface GenerationState {
   status: "queued" | "running" | "success" | "failed";
   url: string | null;
   meta?: GenerationMeta | null;
+  raw_response?: Record<string, unknown>;
   prompt: string;
   error: string | null;
   params?: GenerationParams;
@@ -94,10 +101,19 @@ export default function Workspace() {
     }
   };
 
-  const selectedEngine = ENGINES.find((e) => e.id === engine);
+  const selectedEngine = ENGINES.find((e) => e.id === (currentGeneration?.engine || engine));
   const isFreeTier = profile?.plan === "free";
   const limitReached = isFreeTier && (profile?.remainingGenerations === 0);
   const isEngineC = engine === "image_engine_c";
+  const aspectRatioValue = currentGeneration?.meta?.aspectRatio || currentGeneration?.params?.aspectRatio;
+  const styleValue = currentGeneration?.meta?.style || currentGeneration?.params?.style;
+  const imageUrls = currentGeneration?.type === "image"
+    ? (currentGeneration.meta?.urls && currentGeneration.meta.urls.length > 0
+      ? currentGeneration.meta.urls
+      : currentGeneration?.url
+        ? [currentGeneration.url]
+        : [])
+    : [];
 
   const handleReferenceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -196,6 +212,7 @@ export default function Workspace() {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: {
+          engineKey: engine,
           engine,
           type,
           prompt: promptValidation.data,
@@ -220,21 +237,38 @@ export default function Workspace() {
         description: "Your AI generation has been queued",
       });
 
-      // Update state to show running status
+      // Update state with normalized response
       setCurrentGeneration({
         id: data.id,
         engine: data.engine,
         type: data.type,
         status: data.status,
-        url: null,
-        meta: null,
+        url: data.url || null,
+        meta: data.meta || null,
+        raw_response: data.raw_response,
         prompt: data.prompt,
-        error: null,
-        params,
+        error: data.error || null,
+        params: data.params || params,
       });
 
-      // Poll for result
-      pollGenerationStatus(data.id);
+      if (data.status === "success" || data.status === "failed") {
+        setLoading(false);
+        if (data.status === "success") {
+          toast({
+            title: "Generation Complete!",
+            description: "Your creation is ready",
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Generation Failed",
+            description: data.error || "Something went wrong",
+          });
+        }
+      } else {
+        // Poll for result
+        pollGenerationStatus(data.id);
+      }
       
       // Refresh profile to update usage
       refetchProfile();
@@ -295,8 +329,9 @@ export default function Workspace() {
             engine: data.engine,
             type: data.type,
             status: data.status,
-            url: data.url,
-            meta: data.meta,
+            url: data.url || prev?.url || null,
+            meta: data.meta || prev?.meta || null,
+            raw_response: data.raw_response || prev?.raw_response,
             prompt: data.prompt,
             error: data.error,
             params: data.params || prev?.params,
@@ -708,10 +743,10 @@ export default function Workspace() {
                 <div className="w-full space-y-4">
                   {currentGeneration.type === "image" ? (
                     // Image preview - check for multiple URLs
-                    currentGeneration.meta?.urls && currentGeneration.meta.urls.length > 1 ? (
+                    imageUrls.length > 1 ? (
                       // Multi-image grid
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {currentGeneration.meta.urls.map((imageUrl, index) => (
+                        {imageUrls.map((imageUrl, index) => (
                           <div 
                             key={index}
                             className="relative rounded-lg overflow-hidden border border-border/50 bg-muted/50 aspect-square"
@@ -731,7 +766,7 @@ export default function Workspace() {
                       // Single image
                       <div className="relative rounded-lg overflow-hidden border border-border bg-muted/50">
                         <img
-                          src={currentGeneration.url || ""}
+                          src={imageUrls[0] || ""}
                           alt="Generated content"
                           className="w-full h-auto max-h-[500px] object-contain"
                         />
@@ -778,17 +813,17 @@ export default function Workspace() {
                         <span className="font-medium capitalize">{currentGeneration.type}</span>
                       </div>
 
-                      {currentGeneration.params?.aspectRatio && (
+                      {aspectRatioValue && (
                         <div className="bg-muted/50 p-3 rounded-lg">
                           <p className="text-muted-foreground text-xs mb-1">Aspect Ratio</p>
-                          <span className="font-medium">{currentGeneration.params.aspectRatio}</span>
+                          <span className="font-medium">{aspectRatioValue}</span>
                         </div>
                       )}
 
-                      {currentGeneration.params?.style && currentGeneration.params.style !== "none" && (
+                      {styleValue && styleValue !== "none" && (
                         <div className="bg-muted/50 p-3 rounded-lg">
                           <p className="text-muted-foreground text-xs mb-1">Style</p>
-                          <span className="font-medium capitalize">{currentGeneration.params.style}</span>
+                          <span className="font-medium capitalize">{styleValue}</span>
                         </div>
                       )}
                     </div>

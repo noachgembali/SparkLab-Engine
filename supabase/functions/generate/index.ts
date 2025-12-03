@@ -6,10 +6,99 @@ const corsHeaders = {
 }
 
 interface GenerateRequest {
-  engine: string
+  engineKey?: string
+  engine?: string
   type: 'image' | 'video'
   prompt: string
   params?: Record<string, unknown>
+}
+
+type GenerationStatus = 'success' | 'failed'
+
+interface NormalizedGenerationResult {
+  engine: string
+  type: 'image' | 'video'
+  status: GenerationStatus
+  url: string | null
+  meta: Record<string, unknown>
+  raw_response: Record<string, unknown>
+}
+
+const SUPPORTED_ENGINES = ['image_engine_a', 'image_engine_b', 'image_engine_c', 'video_engine_a']
+const STUB_IMAGE_URL = 'https://example.com/fake.jpg'
+const STUB_VIDEO_URL = 'https://example.com/fake-video-result.mp4'
+
+const parseImageMeta = (params: Record<string, unknown> = {}) => {
+  const outputCount = Math.min(Math.max((params.outputCount as number) || 1, 1), 4)
+  const urls = Array.from({ length: outputCount }, () => STUB_IMAGE_URL)
+
+  return {
+    urls,
+    aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio : undefined,
+    style: typeof params.style === 'string' ? params.style : undefined,
+    steps: typeof params.steps === 'number' ? params.steps : undefined,
+    promptStrength: typeof params.promptStrength === 'number' ? params.promptStrength : undefined,
+    seed: typeof params.seed === 'number' ? params.seed : undefined,
+    outputCount,
+  }
+}
+
+const parseVideoMeta = (params: Record<string, unknown> = {}) => ({
+  aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio : undefined,
+  style: typeof params.style === 'string' ? params.style : undefined,
+  steps: typeof params.steps === 'number' ? params.steps : undefined,
+})
+
+const simulateImageEngine = (
+  engineKey: string,
+  type: 'image' | 'video',
+  params: Record<string, unknown> | undefined
+): NormalizedGenerationResult => {
+  if (type !== 'image') {
+    throw new Error(`Engine ${engineKey} only supports image generations`)
+  }
+
+  const meta = parseImageMeta(params || {})
+
+  return {
+    engine: engineKey,
+    type,
+    status: 'success',
+    url: STUB_IMAGE_URL,
+    meta,
+    raw_response: {
+      stub: true,
+      engineKey,
+      type,
+      params,
+    },
+  }
+}
+
+const simulateVideoEngine = (
+  engineKey: string,
+  type: 'image' | 'video',
+  params: Record<string, unknown> | undefined
+): NormalizedGenerationResult => {
+  if (type !== 'video') {
+    throw new Error(`Engine ${engineKey} only supports video generations`)
+  }
+
+  const meta = parseVideoMeta(params || {})
+
+  return {
+    engine: engineKey,
+    type,
+    status: 'success',
+    url: STUB_VIDEO_URL,
+    meta,
+    raw_response: {
+      stub: true,
+      engineKey,
+      type,
+      params,
+    },
+  }
 }
 
 Deno.serve(async (req) => {
@@ -73,33 +162,63 @@ Deno.serve(async (req) => {
 
     // Parse request body
     const body: GenerateRequest = await req.json()
+    const engineKey = body.engineKey || body.engine
     
-    if (!body.engine || !body.type || !body.prompt) {
+    if (!engineKey || !body.type || !body.prompt) {
       return new Response(
-        JSON.stringify({ code: 'INVALID_REQUEST', message: 'Missing required fields: engine, type, prompt' }),
+        JSON.stringify({ code: 'INVALID_REQUEST', message: 'Missing required fields: engineKey, type, prompt' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
     // Validate engine
-    const validEngines = ['image_engine_a', 'image_engine_b', 'image_engine_c', 'video_engine_a']
-    if (!validEngines.includes(body.engine)) {
+    if (!SUPPORTED_ENGINES.includes(engineKey)) {
       return new Response(
-        JSON.stringify({ code: 'INVALID_ENGINE', message: `Invalid engine. Valid options: ${validEngines.join(', ')}` }),
+        JSON.stringify({ code: 'INVALID_ENGINE', message: `Invalid engine. Valid options: ${SUPPORTED_ENGINES.join(', ')}` }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Create generation record
+    const requiredType = engineKey.startsWith('video') ? 'video' : 'image'
+    if (requiredType !== body.type) {
+      return new Response(
+        JSON.stringify({ code: 'INVALID_TYPE', message: `Engine ${engineKey} only supports ${requiredType} generations` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    let normalizedResult: NormalizedGenerationResult
+
+    switch (engineKey) {
+      case 'image_engine_a':
+        normalizedResult = simulateImageEngine(engineKey, body.type, body.params)
+        break
+      case 'image_engine_b':
+        normalizedResult = simulateImageEngine(engineKey, body.type, body.params)
+        break
+      case 'image_engine_c':
+        normalizedResult = simulateImageEngine(engineKey, body.type, body.params)
+        break
+      case 'video_engine_a':
+        normalizedResult = simulateVideoEngine(engineKey, body.type, body.params)
+        break
+      default:
+        throw new Error('Unsupported engine')
+    }
+
+    // Create generation record with normalized result
     const { data: generation, error: insertError } = await supabase
       .from('generations')
       .insert({
         user_id: user.id,
-        engine: body.engine,
-        type: body.type,
-        status: 'queued',
+        engine: normalizedResult.engine,
+        type: normalizedResult.type,
+        status: normalizedResult.status,
         prompt: body.prompt,
-        params: body.params || {}
+        params: body.params || {},
+        result_url: normalizedResult.url,
+        result_meta: normalizedResult.meta,
+        raw_response: normalizedResult.raw_response,
       })
       .select()
       .single()
@@ -124,42 +243,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Simulate async processing - update to success with fake result
-    setTimeout(async () => {
-      const fakeImageUrl = 'https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?w=800'
-      const fakeVideoUrl = 'https://example.com/fake-video-result.mp4'
-      
-      // Handle multiple outputs for images
-      const outputCount = body.type === 'image' 
-        ? Math.min(Math.max((body.params?.outputCount as number) || 1, 1), 4)
-        : 1
-      
-      // Build result_meta with urls array for images
-      const resultMeta: Record<string, unknown> = { 
-        note: 'Stubbed response - will be replaced with real engine integration',
-        engine_version: '1.0.0',
-        processing_time_ms: 2500
-      }
-      
-      if (body.type === 'image') {
-        // Create array of URLs (using same stub URL for now)
-        const urls = Array.from({ length: outputCount }, () => fakeImageUrl)
-        resultMeta.urls = urls
-      }
-
-      await supabase
-        .from('generations')
-        .update({
-          status: 'success',
-          result_url: body.type === 'image' ? fakeImageUrl : fakeVideoUrl,
-          result_meta: resultMeta
-        })
-        .eq('id', generation.id)
-      
-      console.log('Generation completed:', generation.id, 'with', outputCount, 'outputs')
-    }, 2000)
-
-    console.log('Generation created:', generation.id, 'for user:', user.id)
+    console.log('Generation completed:', generation.id, 'for user:', user.id)
 
     return new Response(
       JSON.stringify({
@@ -167,11 +251,14 @@ Deno.serve(async (req) => {
         engine: generation.engine,
         type: generation.type,
         status: generation.status,
+        url: generation.result_url,
+        meta: generation.result_meta,
+        raw_response: generation.raw_response,
         prompt: generation.prompt,
+        params: generation.params,
         createdAt: generation.created_at,
-        message: 'Generation queued successfully'
       }),
-      { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {

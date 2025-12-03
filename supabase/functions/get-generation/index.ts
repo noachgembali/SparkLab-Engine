@@ -68,6 +68,7 @@ Deno.serve(async (req) => {
         status: generation.status,
         url: generation.result_url,
         meta: generation.result_meta,
+        raw_response: generation.raw_response,
         prompt: generation.prompt,
         params: generation.params,
         error: generation.error,
