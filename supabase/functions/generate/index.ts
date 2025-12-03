@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { EngineKey, getEngineConfig } from './enginesConfig.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,8 +7,8 @@ const corsHeaders = {
 }
 
 interface GenerateRequest {
-  engineKey?: string
-  engine?: string
+  engineKey?: EngineKey
+  engine?: EngineKey
   type: 'image' | 'video'
   prompt: string
   params?: Record<string, unknown>
@@ -16,7 +17,7 @@ interface GenerateRequest {
 type GenerationStatus = 'success' | 'failed'
 
 interface NormalizedGenerationResult {
-  engine: string
+  engine: EngineKey
   type: 'image' | 'video'
   status: GenerationStatus
   url: string | null
@@ -24,12 +25,11 @@ interface NormalizedGenerationResult {
   raw_response: Record<string, unknown>
 }
 
-const SUPPORTED_ENGINES = ['image_engine_a', 'image_engine_b', 'image_engine_c', 'video_engine_a']
 const STUB_IMAGE_URL = 'https://example.com/fake.jpg'
 const STUB_VIDEO_URL = 'https://example.com/fake-video-result.mp4'
 
-const parseImageMeta = (params: Record<string, unknown> = {}) => {
-  const outputCount = Math.min(Math.max((params.outputCount as number) || 1, 1), 4)
+const parseImageMeta = (params: Record<string, unknown> = {}, maxOutputs: number) => {
+  const outputCount = Math.min(Math.max((params.outputCount as number) || 1, 1), maxOutputs)
   const urls = Array.from({ length: outputCount }, () => STUB_IMAGE_URL)
 
   return {
@@ -50,7 +50,7 @@ const parseVideoMeta = (params: Record<string, unknown> = {}) => ({
 })
 
 const simulateImageEngine = (
-  engineKey: string,
+  engineKey: EngineKey,
   type: 'image' | 'video',
   params: Record<string, unknown> | undefined
 ): NormalizedGenerationResult => {
@@ -58,7 +58,7 @@ const simulateImageEngine = (
     throw new Error(`Engine ${engineKey} only supports image generations`)
   }
 
-  const meta = parseImageMeta(params || {})
+  const meta = parseImageMeta(params || {}, getEngineConfig(engineKey).maxOutputs)
 
   return {
     engine: engineKey,
@@ -76,7 +76,7 @@ const simulateImageEngine = (
 }
 
 const simulateVideoEngine = (
-  engineKey: string,
+  engineKey: EngineKey,
   type: 'image' | 'video',
   params: Record<string, unknown> | undefined
 ): NormalizedGenerationResult => {
@@ -148,21 +148,13 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Check free tier limit
-    if (profile.plan === 'free' && profile.used_generations >= 5) {
-      console.log('Free tier limit reached for user:', user.id)
-      return new Response(
-        JSON.stringify({ 
-          code: 'LIMIT_REACHED', 
-          message: 'Free trial limit reached. Please upgrade to continue generating.' 
-        }),
-        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    const FREE_TIER_LIMIT = 5
+    const isFreePlan = profile.plan === 'free'
+    const freeLimitReached = isFreePlan && profile.used_generations >= FREE_TIER_LIMIT
 
     // Parse request body
     const body: GenerateRequest = await req.json()
-    const engineKey = body.engineKey || body.engine
+    const engineKey = (body.engineKey || body.engine) as EngineKey
     
     if (!engineKey || !body.type || !body.prompt) {
       return new Response(
@@ -171,21 +163,70 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Validate engine
-    if (!SUPPORTED_ENGINES.includes(engineKey)) {
+    // Enforce free-tier limit before any processing
+    if (freeLimitReached) {
+      console.log('Free tier limit reached for user:', user.id)
       return new Response(
-        JSON.stringify({ code: 'INVALID_ENGINE', message: `Invalid engine. Valid options: ${SUPPORTED_ENGINES.join(', ')}` }),
+        JSON.stringify({
+          error: 'FREE_TIER_LIMIT',
+          message: `You have used all ${FREE_TIER_LIMIT} free generations. Upgrade to Pro for unlimited access.`,
+        }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Validate engine and fetch config
+    let engineConfig: ReturnType<typeof getEngineConfig>
+    try {
+      engineConfig = getEngineConfig(engineKey)
+    } catch (error) {
+      return new Response(
+        JSON.stringify({ code: 'INVALID_ENGINE', message: (error as Error).message }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    const requiredType = engineKey.startsWith('video') ? 'video' : 'image'
-    if (requiredType !== body.type) {
+    // Validate type against engine config
+    if (engineConfig.type !== body.type) {
       return new Response(
-        JSON.stringify({ code: 'INVALID_TYPE', message: `Engine ${engineKey} only supports ${requiredType} generations` }),
+        JSON.stringify({ code: 'INVALID_TYPE', message: `Engine ${engineKey} only supports ${engineConfig.type} generations` }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    // Ensure engine is connected for the authenticated user
+    const { data: connectionRows, error: connectionError } = await supabase
+      .from('engine_connections')
+      .select('status')
+      .eq('user_id', user.id)
+      .eq('engine_key', engineKey)
+      .limit(1)
+
+    if (connectionError) {
+      console.error('Error checking engine connection:', connectionError)
+      return new Response(
+        JSON.stringify({ error: 'ENGINE_CONNECTION_CHECK_FAILED', message: 'Unable to verify engine connection' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const connection = connectionRows?.[0]
+    if (!connection || connection.status !== 'connected') {
+      return new Response(
+        JSON.stringify({
+          error: 'ENGINE_NOT_CONNECTED',
+          message: 'Please connect this engine in your SparkLab Account before generating.',
+        }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // Enforce output count limits per engine
+    if (body.params && typeof body.params.outputCount === 'number' && body.params.outputCount > engineConfig.maxOutputs) {
+      body.params.outputCount = engineConfig.maxOutputs
+    }
+
+    // TODO: Disallow reference images for engines that don't support it (engineConfig.supportsReferenceImage)
 
     let normalizedResult: NormalizedGenerationResult
 
@@ -231,16 +272,14 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Increment used_generations for free users
-    if (profile.plan === 'free') {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ used_generations: profile.used_generations + 1 })
-        .eq('id', user.id)
+    // Increment used_generations (tracks usage for both free and paid)
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ used_generations: profile.used_generations + 1 })
+      .eq('id', user.id)
 
-      if (updateError) {
-        console.error('Update error:', updateError)
-      }
+    if (updateError) {
+      console.error('Update error:', updateError)
     }
 
     console.log('Generation completed:', generation.id, 'for user:', user.id)

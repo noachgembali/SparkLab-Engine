@@ -1,21 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
-
-export interface Generation {
-  id: string;
-  engine: string;
-  type: "image" | "video";
-  status: "queued" | "running" | "success" | "failed";
-  url: string | null;
-  meta: Record<string, any> | null;
-  raw_response?: Record<string, any> | null;
-  params?: Record<string, any> | null;
-  prompt: string;
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+import { Generation, normalizeGeneration } from "@/types/generation";
 
 interface GenerationsResponse {
   data: Generation[];
@@ -51,7 +37,8 @@ export function useGenerations() {
       });
 
       if (error) throw error;
-      setGenerations(data.data);
+      const normalized = (data.data || []).map(normalizeGeneration);
+      setGenerations(normalized);
       setPagination(data.pagination);
       setError(null);
     } catch (err: any) {
@@ -90,7 +77,7 @@ export function useGeneration(id: string | null) {
       });
 
       if (error) throw error;
-      setGeneration(data);
+      setGeneration(normalizeGeneration(data));
       setError(null);
     } catch (err: any) {
       console.error("Error fetching generation:", err);
@@ -106,3 +93,5 @@ export function useGeneration(id: string | null) {
 
   return { generation, loading, error, refetch: fetchGeneration };
 }
+
+export type { Generation } from "@/types/generation";

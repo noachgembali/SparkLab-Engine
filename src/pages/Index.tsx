@@ -1,6 +1,7 @@
-import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { 
   Zap, 
@@ -16,13 +17,6 @@ import {
   Wand2,
   History
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 
 // Mock Workspace Preview Component
 function WorkspaceMockPreview() {
@@ -189,9 +183,9 @@ function PricingCard({
 }
 
 export default function Index() {
-  const { user, loading } = useAuth();
+  const { user, session, loading } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
 
   const handleLaunchWorkspace = () => {
     if (user) {
@@ -206,6 +200,38 @@ export default function Index() {
       navigate("/dashboard");
     } else {
       navigate("/auth");
+    }
+  };
+
+  const handleUpgrade = async () => {
+    if (!user || !session?.access_token) {
+      navigate("/auth");
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("upgrade-plan", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Upgraded to SparkLab Pro",
+        description: "Enjoy unlimited generations.",
+      });
+      navigate("/account");
+    } catch (err: any) {
+      console.error("Upgrade error:", err);
+      const message = err?.message || "Failed to upgrade plan";
+      toast({
+        variant: "destructive",
+        title: "Upgrade failed",
+        description: message,
+      });
     }
   };
 
@@ -451,9 +477,9 @@ export default function Index() {
                 "Advanced controls",
                 "Premium support"
               ]}
-              cta="Join Waitlist"
+              cta="Upgrade to Pro"
               highlighted
-              onCtaClick={() => setUpgradeModalOpen(true)}
+              onCtaClick={handleUpgrade}
             />
           </div>
         </div>
@@ -505,32 +531,6 @@ export default function Index() {
         </div>
       </footer>
 
-      {/* Upgrade Modal */}
-      <Dialog open={upgradeModalOpen} onOpenChange={setUpgradeModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-primary" />
-              Pro Plan Coming Soon
-            </DialogTitle>
-            <DialogDescription className="pt-4">
-              We're working hard to bring you unlimited generations with the Pro plan. 
-              Stay tuned — upgrades will be available very soon!
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-4 p-4 rounded-lg bg-muted/50 border border-border/50">
-            <p className="text-sm text-muted-foreground">
-              In the meantime, enjoy your <span className="text-primary font-medium">5 free generations</span> and 
-              explore everything SparkLab has to offer.
-            </p>
-          </div>
-          <div className="mt-4 flex justify-end">
-            <Button variant="glow" onClick={() => setUpgradeModalOpen(false)}>
-              Got it!
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

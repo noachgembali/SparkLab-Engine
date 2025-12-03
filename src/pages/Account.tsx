@@ -45,15 +45,15 @@ interface EngineConnection {
 
 export default function Account() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const { profile, loading: profileLoading, refetch: refetchProfile } = useProfile();
   const { toast } = useToast();
-  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [engineConnectModalOpen, setEngineConnectModalOpen] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState<{ id: string; name: string } | null>(null);
   const [engineConnections, setEngineConnections] = useState<Record<string, EngineConnection>>({});
   const [loadingConnections, setLoadingConnections] = useState(true);
   const [savingConnection, setSavingConnection] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
 
   // Define engines array before useEffect hooks
   const engines = [
@@ -204,6 +204,41 @@ export default function Account() {
       });
     } else {
       navigate("/auth");
+    }
+  };
+
+  const handleUpgradePlan = async () => {
+    if (!user) {
+      navigate("/auth");
+      return;
+    }
+
+    setUpgrading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("upgrade-plan", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+      });
+
+      if (error) throw error;
+
+      await refetchProfile();
+      toast({
+        title: "Upgraded to SparkLab Pro",
+        description: "Enjoy unlimited generations.",
+      });
+    } catch (err: any) {
+      console.error("Upgrade error:", err);
+      const message = err?.message || err?.context?.body || "Failed to upgrade plan";
+      toast({
+        variant: "destructive",
+        title: "Upgrade failed",
+        description: message,
+      });
+    } finally {
+      setUpgrading(false);
     }
   };
 
@@ -414,7 +449,7 @@ export default function Account() {
                     <span className="inline-block h-5 w-16 bg-muted rounded animate-pulse" />
                   ) : (
                     <span className="capitalize font-semibold">
-                      {profile?.plan === "free" ? "Free Trial" : "Pro"}
+                      {profile?.plan === "free" ? "Free Trial — 5 generations total" : "SparkLab Pro — Unlimited generations"}
                     </span>
                   )}
                 </Badge>
@@ -435,8 +470,8 @@ export default function Account() {
                   />
                   <p className="text-sm text-muted-foreground">
                     {profile?.remainingGenerations === 0 
-                      ? "You've used all your free generations" 
-                      : `${profile?.remainingGenerations || 0} free generations remaining`
+                      ? "You've used all 5 free generations. Upgrade for unlimited access." 
+                      : `${profile?.remainingGenerations || 0} free generations remaining (of 5 total)`
                     }
                   </p>
                 </div>
@@ -460,24 +495,32 @@ export default function Account() {
                   variant="glow" 
                   size="lg" 
                   className="w-full"
-                  onClick={() => setUpgradeModalOpen(true)}
+                  onClick={handleUpgradePlan}
+                  disabled={upgrading}
                 >
-                  <Crown className="w-5 h-5 mr-2" />
-                  Upgrade to Unlimited (Pro)
+                  {upgrading ? "Upgrading..." : (
+                    <>
+                      <Crown className="w-5 h-5 mr-2" />
+                      Upgrade to Pro
+                    </>
+                  )}
                 </Button>
               ) : (
                 <div className="p-4 rounded-xl border border-border/50 bg-muted/20 text-center">
                   <div className="flex items-center justify-center gap-2 text-success font-medium">
                     <Crown className="w-5 h-5" />
-                    You are on the Pro plan
+                    You’re on SparkLab Pro — Unlimited generations
                   </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Manage plan (coming soon)
+                  </p>
                 </div>
               )}
             </CardContent>
           </Card>
 
           {/* SparkLab Engines Section */}
-          <Card>
+          <Card id="engines">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Plug className="w-5 h-5 text-primary" />
@@ -569,36 +612,6 @@ export default function Account() {
           </Card>
         </div>
       </main>
-
-      {/* Upgrade Modal */}
-      <Dialog open={upgradeModalOpen} onOpenChange={setUpgradeModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Crown className="w-5 h-5 text-warning" />
-              Pro Upgrade Coming Soon
-            </DialogTitle>
-            <DialogDescription className="space-y-4 pt-4">
-              <p>
-                Pro upgrade will be available soon. We currently support one simple plan:
-              </p>
-              <div className="p-4 rounded-xl bg-gradient-to-br from-primary/10 to-accent/10 border border-primary/30">
-                <p className="text-foreground font-semibold mb-2">Pro Plan</p>
-                <p className="text-2xl font-bold text-gradient mb-1">₹100–₹200 / month</p>
-                <p className="text-sm text-muted-foreground">Unlimited generations</p>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                We're working on payment integration. Stay tuned for updates!
-              </p>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-3 mt-4">
-            <Button variant="outline" onClick={() => setUpgradeModalOpen(false)}>
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Engine Connect Modal */}
       <Dialog open={engineConnectModalOpen} onOpenChange={setEngineConnectModalOpen}>

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
+import { useEngineConnections } from "@/hooks/useEngineConnections";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,9 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
-import { Zap, LogOut, Image, Video, Sparkles, Loader2, RefreshCw, ArrowLeft, ChevronDown, Upload, X } from "lucide-react";
+import { Zap, LogOut, Image, Video, Sparkles, Loader2, ArrowLeft, ChevronDown, Upload, X } from "lucide-react";
 import { z } from "zod";
 import { PlanBadge } from "@/components/PlanBadge";
+import { Generation, GenerationParams, normalizeGeneration } from "@/types/generation";
 
 const promptSchema = z.string().trim().min(1, "Prompt is required").max(1000, "Prompt must be under 1000 characters");
 
@@ -24,51 +26,18 @@ const ENGINES = [
   { id: "video_engine_a", name: "Video Engine A", type: "video", description: "Short video clips" },
 ] as const;
 
-interface GenerationParams {
-  aspectRatio?: string;
-  steps?: number;
-  promptStrength?: number;
-  seed?: number;
-  style?: string;
-  referenceImageUrl?: string;
-  outputCount?: number;
-}
-
-interface GenerationMeta {
-  urls?: string[];
-  aspectRatio?: string;
-  style?: string;
-  steps?: number;
-  promptStrength?: number;
-  seed?: number;
-  outputCount?: number;
-  [key: string]: unknown;
-}
-
-interface GenerationState {
-  id: string;
-  engine: string;
-  type: "image" | "video";
-  status: "queued" | "running" | "success" | "failed";
-  url: string | null;
-  meta?: GenerationMeta | null;
-  raw_response?: Record<string, unknown>;
-  prompt: string;
-  error: string | null;
-  params?: GenerationParams;
-}
-
 export default function Workspace() {
   const navigate = useNavigate();
   const { user, session, loading: authLoading } = useAuth();
   const { profile, loading: profileLoading, refetch: refetchProfile } = useProfile();
+  const { connections: engineConnections, isLoading: connectionsLoading } = useEngineConnections();
   const { toast } = useToast();
 
   const [engine, setEngine] = useState("");
   const [type, setType] = useState<"image" | "video">("image");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
-  const [currentGeneration, setCurrentGeneration] = useState<GenerationState | null>(null);
+  const [currentGeneration, setCurrentGeneration] = useState<Generation | null>(null);
   
   // Advanced settings
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -105,13 +74,16 @@ export default function Workspace() {
   const isFreeTier = profile?.plan === "free";
   const limitReached = isFreeTier && (profile?.remainingGenerations === 0);
   const isEngineC = engine === "image_engine_c";
-  const aspectRatioValue = currentGeneration?.meta?.aspectRatio || currentGeneration?.params?.aspectRatio;
-  const styleValue = currentGeneration?.meta?.style || currentGeneration?.params?.style;
+  const selectedEngineConnection = engine ? engineConnections[engine] : undefined;
+  const isEngineConnected = selectedEngineConnection === "connected";
+  const isCheckingConnection = !!engine && connectionsLoading && selectedEngineConnection === undefined;
+  const aspectRatioValue = currentGeneration?.resultMeta?.aspectRatio || currentGeneration?.params?.aspectRatio;
+  const styleValue = currentGeneration?.resultMeta?.style || currentGeneration?.params?.style;
   const imageUrls = currentGeneration?.type === "image"
-    ? (currentGeneration.meta?.urls && currentGeneration.meta.urls.length > 0
-      ? currentGeneration.meta.urls
-      : currentGeneration?.url
-        ? [currentGeneration.url]
+    ? (currentGeneration.resultMeta?.urls && currentGeneration.resultMeta.urls.length > 0
+      ? currentGeneration.resultMeta.urls
+      : currentGeneration?.resultUrl
+        ? [currentGeneration.resultUrl]
         : [])
     : [];
 
@@ -194,16 +166,20 @@ export default function Workspace() {
       params.referenceImageUrl = referenceImagePreview;
     }
 
+    const now = new Date().toISOString();
     setCurrentGeneration({
       id: "generating",
       engine,
       type,
       status: "queued",
-      url: null,
-      meta: null,
+      resultUrl: null,
+      resultMeta: null,
+      rawResponse: null,
       prompt: promptValidation.data,
       error: null,
       params,
+      createdAt: now,
+      updatedAt: now,
     });
 
     try {
@@ -222,12 +198,13 @@ export default function Workspace() {
 
       if (error) throw error;
 
-      if (data?.code === "LIMIT_REACHED") {
+      if (data?.error === "FREE_TIER_LIMIT") {
         toast({
           variant: "destructive",
-          title: "Limit Reached",
-          description: data.message,
+          title: "Free tier limit reached",
+          description: data.message || "You've used all free generations. Upgrade to Pro for unlimited access.",
         });
+        navigate("/account");
         setCurrentGeneration(null);
         return;
       }
@@ -237,19 +214,11 @@ export default function Workspace() {
         description: "Your AI generation has been queued",
       });
 
-      // Update state with normalized response
-      setCurrentGeneration({
-        id: data.id,
-        engine: data.engine,
-        type: data.type,
-        status: data.status,
-        url: data.url || null,
-        meta: data.meta || null,
-        raw_response: data.raw_response,
-        prompt: data.prompt,
-        error: data.error || null,
-        params: data.params || params,
+      const normalizedInitial = normalizeGeneration({
+        ...data,
+        params: data?.params ?? params,
       });
+      setCurrentGeneration(normalizedInitial);
 
       if (data.status === "success" || data.status === "failed") {
         setLoading(false);
@@ -276,11 +245,19 @@ export default function Workspace() {
       console.error("Generate error:", error);
       
       let errorMessage = "Failed to create generation";
+      let engineNotConnected = false;
+      let freeTierLimit = false;
       try {
         if (error.context?.body) {
           const body = JSON.parse(error.context.body);
           if (body.code === "LIMIT_REACHED") {
             errorMessage = body.message;
+          } else if (body.error === "ENGINE_NOT_CONNECTED") {
+            engineNotConnected = true;
+            errorMessage = body.message || "This engine is not connected.";
+          } else if (body.error === "FREE_TIER_LIMIT") {
+            freeTierLimit = true;
+            errorMessage = body.message || "You have used all free generations. Upgrade to Pro.";
           }
         }
       } catch {}
@@ -290,6 +267,12 @@ export default function Workspace() {
         title: "Error",
         description: error.message || errorMessage,
       });
+
+      if (engineNotConnected) {
+        navigate("/account#engines");
+      } else if (freeTierLimit) {
+        navigate("/account");
+      }
       
       setCurrentGeneration(null);
       setLoading(false);
@@ -324,18 +307,20 @@ export default function Workspace() {
         if (error) throw error;
 
         if (data) {
-          setCurrentGeneration((prev) => ({
-            id: data.id,
-            engine: data.engine,
-            type: data.type,
-            status: data.status,
-            url: data.url || prev?.url || null,
-            meta: data.meta || prev?.meta || null,
-            raw_response: data.raw_response || prev?.raw_response,
-            prompt: data.prompt,
-            error: data.error,
-            params: data.params || prev?.params,
-          }));
+          setCurrentGeneration((prev) => {
+            const normalized = normalizeGeneration({
+              ...prev,
+              ...data,
+              result_url: data.result_url ?? data.url ?? prev?.resultUrl,
+              result_meta: data.result_meta ?? data.meta ?? prev?.resultMeta,
+              raw_response: data.raw_response ?? prev?.rawResponse,
+              params: data.params ?? prev?.params ?? null,
+              createdAt: data.createdAt ?? data.created_at ?? prev?.createdAt,
+              updatedAt: data.updatedAt ?? data.updated_at ?? new Date().toISOString(),
+            });
+
+            return normalized;
+          });
 
           // Stop polling if done
           if (data.status === "success" || data.status === "failed") {
@@ -445,6 +430,26 @@ export default function Workspace() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Engine Connection Warning */}
+              {engine && !connectionsLoading && !isEngineConnected && (
+                <div className="flex items-start justify-between gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-warning">Engine not connected</p>
+                    <p className="text-xs text-warning/80">
+                      To use this engine, connect it from your Account → SparkLab Engines page.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigate("/account#engines")}
+                    className="shrink-0 border-warning/40 text-warning hover:bg-warning/20"
+                  >
+                    Go to Engine Connections
+                  </Button>
+                </div>
+              )}
 
               {/* Type Selection */}
               <div className="space-y-2">
@@ -646,10 +651,24 @@ export default function Workspace() {
               {/* Generate Button */}
               <Button
                 onClick={handleGenerate}
-                disabled={loading || !engine || !prompt.trim() || limitReached}
+                disabled={
+                  loading ||
+                  !engine ||
+                  !prompt.trim() ||
+                  limitReached ||
+                  isCheckingConnection ||
+                  !isEngineConnected
+                }
                 variant="glow"
                 size="lg"
                 className="w-full"
+                title={
+                  !engine
+                    ? "Select an engine to continue"
+                    : !isEngineConnected
+                      ? "Connect this engine in Account → SparkLab Engines"
+                      : undefined
+                }
               >
                 {loading ? (
                   <>
@@ -776,7 +795,7 @@ export default function Workspace() {
                     // Video preview
                     <div className="relative rounded-lg overflow-hidden border border-border bg-muted/50">
                       <video
-                        src={currentGeneration.url || ""}
+                        src={currentGeneration.resultUrl || ""}
                         controls
                         className="w-full h-auto max-h-[500px]"
                       />
