@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { EngineKey, getEngineConfig } from './enginesConfig.ts'
+import { EngineConfig, EngineKey, getEngineConfig } from './enginesConfig.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -48,6 +48,36 @@ const parseVideoMeta = (params: Record<string, unknown> = {}) => ({
   style: typeof params.style === 'string' ? params.style : undefined,
   steps: typeof params.steps === 'number' ? params.steps : undefined,
 })
+
+// Future Meta Images integration entrypoint; still stubbed for now
+async function callImageEngineARealOrStub(
+  engineConfig: EngineConfig,
+  prompt: string,
+  params: Record<string, unknown> | undefined
+): Promise<NormalizedGenerationResult> {
+  // Read future credentials (unused for now)
+  const apiKey = engineConfig.envApiKeyName ? Deno.env.get(engineConfig.envApiKeyName) : undefined
+  const apiBase = engineConfig.envApiBaseUrlName ? Deno.env.get(engineConfig.envApiBaseUrlName) : undefined
+
+  const meta = parseImageMeta(params || {}, engineConfig.maxOutputs)
+
+  return {
+    engine: engineConfig.key,
+    type: 'image',
+    status: 'success',
+    url: STUB_IMAGE_URL,
+    meta,
+    raw_response: {
+      stub: true,
+      provider: 'meta-images',
+      note: 'real API integration not implemented yet',
+      apiKeyPresent: !!apiKey,
+      apiBasePresent: !!apiBase,
+      prompt,
+      params,
+    },
+  }
+}
 
 const simulateImageEngine = (
   engineKey: EngineKey,
@@ -232,7 +262,7 @@ Deno.serve(async (req) => {
 
     switch (engineKey) {
       case 'image_engine_a':
-        normalizedResult = simulateImageEngine(engineKey, body.type, body.params)
+        normalizedResult = await callImageEngineARealOrStub(engineConfig, body.prompt, body.params)
         break
       case 'image_engine_b':
         normalizedResult = simulateImageEngine(engineKey, body.type, body.params)

@@ -18,6 +18,52 @@ import {
   History
 } from "lucide-react";
 
+type ShowcaseItem = {
+  title: string;
+  label: string;
+  prompt: string;
+  gradient: string;
+};
+
+const SHOWCASE_ITEMS: ShowcaseItem[] = [
+  {
+    title: "Cinematic Image",
+    label: "Image Engine A",
+    prompt: "Ancient city at dusk, cinematic lighting",
+    gradient: "from-primary/30 via-primary/5 to-accent/20",
+  },
+  {
+    title: "Illustration",
+    label: "Image Engine B",
+    prompt: "Whimsical forest spirits painted in ink",
+    gradient: "from-amber-400/30 via-primary/5 to-primary/20",
+  },
+  {
+    title: "Photorealistic Portrait",
+    label: "Image Engine A",
+    prompt: "Studio portrait, soft rim light, 85mm depth",
+    gradient: "from-emerald-400/25 via-primary/5 to-accent/25",
+  },
+  {
+    title: "Vertical Story Shot",
+    label: "Image Engine C",
+    prompt: "Neo-noir alley, rain-soaked, vertical frame",
+    gradient: "from-fuchsia-500/25 via-primary/5 to-indigo-500/25",
+  },
+  {
+    title: "AI Video Frame",
+    label: "Video Engine A",
+    prompt: "Slow pan over a lunar outpost at sunrise",
+    gradient: "from-cyan-400/25 via-primary/5 to-indigo-500/25",
+  },
+  {
+    title: "Concept Illustration",
+    label: "Image Engine B",
+    prompt: "Retro-futurist rover parked on Mars dunes",
+    gradient: "from-orange-400/25 via-primary/5 to-rose-400/20",
+  },
+];
+
 // Mock Workspace Preview Component
 function WorkspaceMockPreview() {
   return (
@@ -178,6 +224,27 @@ function PricingCard({
       >
         {cta}
       </Button>
+    </div>
+  );
+}
+
+function ShowcaseCard({ item }: { item: ShowcaseItem }) {
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm p-6 transition-all duration-300 hover:border-primary/40 hover:shadow-[0_25px_70px_-35px_rgba(147,51,234,0.45)] hover:-translate-y-1">
+      <div className={`relative mb-4 h-48 rounded-xl bg-gradient-to-br ${item.gradient} border border-border/40 overflow-hidden`}>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.08),transparent_35%),radial-gradient(circle_at_85%_10%,rgba(99,102,241,0.25),transparent_30%)] opacity-70" />
+        <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-background/80 border border-border/50 text-xs font-medium">
+          {item.label}
+        </span>
+        <div className="absolute bottom-3 right-3 px-2 py-1 rounded-full bg-background/60 text-[11px] text-primary flex items-center gap-1 border border-primary/20">
+          <Sparkles className="w-3 h-3" />
+          <span>Preview</span>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold text-foreground">{item.title}</h3>
+        <p className="text-sm text-muted-foreground leading-relaxed">“{item.prompt}”</p>
+      </div>
     </div>
   );
 }
@@ -437,6 +504,26 @@ export default function Index() {
               title="Generate & iterate"
               description="SparkLab remembers your history and lets you refine and re-run your ideas."
             />
+          </div>
+        </div>
+      </section>
+
+      {/* SparkLab Showcase Section */}
+      <section className="relative z-10 py-24 border-t border-border/30 bg-background/60">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-14 max-w-2xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-foreground">
+              SparkLab Showcase
+            </h2>
+            <p className="text-muted-foreground">
+              See the kind of outputs SparkLab is built to create.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+            {SHOWCASE_ITEMS.map((item) => (
+              <ShowcaseCard key={item.title} item={item} />
+            ))}
           </div>
         </div>
       </section>

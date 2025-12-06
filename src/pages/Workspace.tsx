@@ -26,6 +26,29 @@ const ENGINES = [
   { id: "video_engine_a", name: "Video Engine A", type: "video", description: "Short video clips" },
 ] as const;
 
+const ENGINE_SUMMARIES = {
+  image_engine_a: {
+    title: "Image Engine A",
+    tagline: "Balanced, cinematic image generation.",
+    details: "Great for general-purpose prompts and cinematic compositions. Supports multiple outputs and aspect ratios.",
+  },
+  image_engine_b: {
+    title: "Image Engine B",
+    tagline: "Stylized and creative visuals.",
+    details: "Ideal for illustration-style, artistic, or more experimental images. Supports multiple outputs and aspect ratios.",
+  },
+  image_engine_c: {
+    title: "Image Engine C",
+    tagline: "Reference-driven image generation.",
+    details: "Optimized for using reference images to keep consistency in style or character. Supports reference image upload and multiple outputs.",
+  },
+  video_engine_a: {
+    title: "Video Engine A",
+    tagline: "Short, cinematic AI video clips.",
+    details: "Generates short video clips from prompts. Single-output focus, with cinematic emphasis.",
+  },
+} as const;
+
 export default function Workspace() {
   const navigate = useNavigate();
   const { user, session, loading: authLoading } = useAuth();
@@ -86,6 +109,9 @@ export default function Workspace() {
         ? [currentGeneration.resultUrl]
         : [])
     : [];
+  const engineSummary = engine
+    ? ENGINE_SUMMARIES[engine as keyof typeof ENGINE_SUMMARIES]
+    : undefined;
 
   const handleReferenceImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -473,6 +499,28 @@ export default function Workspace() {
                     <Video className="w-4 h-4" />
                     Video
                   </Button>
+                </div>
+              </div>
+
+              {/* Engine Overview */}
+              <div className="rounded-xl border border-border/60 bg-background/70 backdrop-blur-sm p-4 shadow-inner">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10 border border-primary/20 shrink-0">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">
+                      {engineSummary ? engineSummary.title : "Select an engine"}
+                    </p>
+                    <p className="text-xs text-primary font-medium">
+                      {engineSummary ? engineSummary.tagline : "Pick an engine to see its strengths."}
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {engineSummary
+                        ? engineSummary.details
+                        : "We’ll highlight the best use cases, capabilities, and tips once you choose an engine."}
+                    </p>
+                  </div>
                 </div>
               </div>
 

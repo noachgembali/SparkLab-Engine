@@ -38,8 +38,8 @@ export const ENGINE_CONFIGS: Record<EngineKey, EngineConfig> = {
     supportsReferenceImage: false,
     supportsMasks: false,
     maxOutputs: 4,
-    envApiKeyName: "GOOGLE_IMAGEFX_API_KEY",
-    envApiBaseUrlName: "GOOGLE_IMAGEFX_API_BASE_URL",
+    envApiKeyName: "IMAGEFX_API_KEY",
+    envApiBaseUrlName: "IMAGEFX_API_BASE_URL",
   },
   // TODO: Map to Google MixBoard (reference image support)
   image_engine_c: {
@@ -49,8 +49,8 @@ export const ENGINE_CONFIGS: Record<EngineKey, EngineConfig> = {
     supportsReferenceImage: true,
     supportsMasks: false,
     maxOutputs: 4,
-    envApiKeyName: "GOOGLE_MIXBOARD_API_KEY",
-    envApiBaseUrlName: "GOOGLE_MIXBOARD_API_BASE_URL",
+    envApiKeyName: "MIXBOARD_API_KEY",
+    envApiBaseUrlName: "MIXBOARD_API_BASE_URL",
   },
   // TODO: Map to Meta Video
   video_engine_a: {
